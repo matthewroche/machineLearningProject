@@ -1,0 +1,146 @@
+---
+title: "Machine Learning Project"
+author: "Matthew Roche"
+date: "16/08/2017"
+output: html_document
+---
+
+## Executive Summary
+
+This project aims to predict how well a person lifts a dumbell using data from accelerometers on the belt, forearm, arm, and dumbell.
+
+**Preprocessing:** I remove all columns containing NAs, remove timestamps, usernames, IDs and other extrenuous data, create dummy variables for columns containing strings and use principle component analysis to create components covering 95% of the variation
+**Building the model:** After pre-processing, the model is built using ten fold cross-validation and random-forests.
+**Sample error:** The model had 100% accuracy on the training data set. This may be a concern for overfitting.
+**Predictions:** The predictions can be found at the end of this file
+
+## Set Up
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('dplyr')
+library('caret')
+library('rpart.plot')
+```
+
+Import the csv files
+
+```{r setUp}
+train <- tbl_df(read.csv("pml-training.csv", stringsAsFactors = FALSE))
+test <- tbl_df(read.csv("pml-testing.csv", stringsAsFactors = FALSE))
+```
+
+## Exploration
+
+Below I explore files
+
+```{r explore}
+sum(colnames(train) > "")
+```
+
+We can see there are 160 variables to use
+
+```{r explore2}
+levels(factor(train$classe))
+```
+
+There are five classes in the 'classe' variable, so there are five possible ways that the exercise was performed. This is what we are predicting.
+
+```{r explore3}
+str(train)
+```
+
+Several variables appear to contain predominantly NAs. There are also some other columns which are unlikely to be useful, such as timestamps and user names. There are several columns which contain characters. These will have to be converted into dummy variables. Some columns appear to contain only empty strings.
+
+## Pre-processing
+
+Below we will create a function to perform pre-processing. This will involve:
+1 - Converting empty strings to NA
+2 - Remving all columns that feature NAs
+3 - Removing columns that include the index, a timestamp or the user name
+4 - Creates dummy variables for columns featuring strings
+5 - Centers and scales the data
+6 - Performs principle component analysis with a 95% threshold for components
+
+```{r preprocess}
+
+preprocess <- function(data) {
+  # Save classe column
+  if("classe" %in% colnames(data)) {
+    classe <- data$classe
+  }
+  # 1 - Convert empty strings to NA
+  data[data==""] <- NA
+  # 2 - Remove any columns including NA
+  data <- data[,colMeans(is.na(data)) == 0]
+  # 3 - Remove timestamps, usernames and index
+  data <- select(data, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp, -X, -new_window, -num_window)
+  # 4 - Create dummy variables
+  # Use problem_id or classe for testing and training sets respectively
+  if("problem_id" %in% colnames(data)) {
+    dummies <- dummyVars(problem_id ~ ., data = data)
+  } else {
+    dummies <- dummyVars(classe ~ ., data = data)
+  }
+  data <- predict(dummies, newdata=(data))
+  # 5 - Centre, scale and perform PCA
+  if(!exists("preProcValues")) {
+    preProcValues <<- preProcess(data, method = c("center", "scale", "pca"), thresh=0.95)
+  }
+  data <- data.frame(predict(preProcValues, newdata=data))
+  # Put classe column back
+  if(exists("classe")) {
+    data$classe <- classe
+  }
+  return(data)
+}
+
+```
+
+//Pre-process the training data
+
+```{r explore6}
+preProcTrain <- preprocess(train)
+print(str(preProcTrain))
+```
+
+## Training
+
+Create K-fold cross validation with 10 folds
+
+```{r train1}
+train_control<- trainControl(method="cv", number=10)
+```
+
+Train model using the cross validation
+
+```{r train2}
+model<- train(classe~., data=preProcTrain, trControl=train_control, method="rf")
+print(model)
+```
+
+Below we create a confusion matrix.
+
+```{r train3}
+prediction <- predict(model, preProcTrain)
+confusionMatrix(prediction, preProcTrain$classe)
+```
+
+Our model has 100% accuracy, which may be a concern for overfitting.
+
+## Prediction
+
+Pre-process the test set.
+
+```{r prediction1}
+preProcTest <- preprocess(test)
+```
+
+We predict for the test set.
+
+```{r prediction2}
+prediction <- predict(model, preProcTest)
+prediction <- data.frame(prediction, test$problem_id)
+print(prediction)
+```
+
